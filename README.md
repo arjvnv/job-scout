@@ -88,6 +88,8 @@ python3 main.py QUERY [OPTIONS]
 | `--export` | `-e` | Save results to a CSV file | (none) |
 | `--force` | `-f` | Overwrite existing export file | `false` |
 | `--sources` | `-s` | Comma-separated list of sources to query | (all) |
+| `--resume` | | Path to a resume (PDF or .txt) to score listings against | (none) |
+| `--chat` | | Launch the interactive AI chat REPL | `false` |
 
 ### Examples
 
@@ -109,7 +111,71 @@ python3 main.py "research scientist" --type research --sources usajobs
 
 # Export to CSV for filtering in a spreadsheet
 python3 main.py "data analyst" --export results.csv
+
+# Score results against your resume (requires an AI key)
+python3 main.py "ml engineer" --type full-time --resume ~/resume.pdf
+
+# Launch the interactive AI chat REPL
+python3 main.py --chat
 ```
+
+---
+
+## Chat mode
+
+`python3 main.py --chat` starts an interactive REPL where you can describe what you want in natural language. The agent uses the same search pipeline as the standard CLI and can search, filter, score against your resume, open results in the browser, summarize listings, and export to CSV.
+
+```
+$ python3 main.py --chat
+
+job-scout chat  ·  provider: openai (gpt-4o-mini)  ·  resume: loaded (~/resume.pdf)
+Type /help for commands, /exit to quit.
+
+you> find ml internships in nyc
+you> filter to companies with under 500 people
+you> open 1
+you> save these to ~/Desktop/ml-internships.csv
+you> /exit
+```
+
+Built-in commands:
+
+| Command | Description |
+|---|---|
+| `/help` | List commands and agent capabilities. |
+| `/results` | Re-render the current results table. |
+| `/clear` | Clear results and conversation history. |
+| `/resume PATH` | Load or replace the resume in-session. |
+| `/exit`, `/quit` | Exit chat. Ctrl-D also exits. |
+
+Chat mode requires an AI provider key — see [AI setup](#ai-setup) below.
+
+---
+
+## Resume matching
+
+Pass `--resume PATH` to any standard search to score listings against a resume. PDF and plain-text resumes are supported. The results table gets a new colored `Match` column, results are re-sorted by score, and a `Skills Gap` + `Resume Tips` block is printed below the table.
+
+```bash
+python3 main.py "ml engineer" --resume ~/resume.pdf
+```
+
+Without an AI key, `--resume` prints a yellow warning and falls back to the standard table.
+
+---
+
+## AI setup
+
+AI features (chat mode + resume matching) work with any of OpenAI, Anthropic, or Gemini. Add one of the following to your `.env`:
+
+```
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GEMINI_API_KEY=...
+RESUME_PATH=/path/to/resume.pdf   # optional default resume for --chat
+```
+
+The setup wizard (first run) will prompt for an AI provider and an optional default resume path. If multiple keys are set, the first match in the order above wins.
 
 ---
 
