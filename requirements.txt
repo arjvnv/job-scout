@@ -3,3 +3,4 @@ requests>=2.31
 beautifulsoup4>=4.12
 rich>=13.0
 python-dotenv>=1.0
+python-jobspy>=0.4
