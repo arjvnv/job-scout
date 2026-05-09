@@ -36,6 +36,13 @@ _BIDI_CODE_POINTS = frozenset(
 )
 
 
+def _format_date(date_str: str | None) -> str | None:
+    if not date_str:
+        return None
+    # Strip time/timezone from ISO 8601 strings like "2026-05-06T00:01:45+00:00"
+    return date_str[:10]
+
+
 def _safe_cell(s: str | None) -> Text:
     if s is None:
         return Text("")
@@ -83,7 +90,7 @@ def render_table(listings: list[JobListing], query: str) -> None:
             _safe_cell(listing.location),
             type_display,
             _safe_cell(listing.source),
-            _safe_cell(listing.posted_date),
+            _safe_cell(_format_date(listing.posted_date)),
             _safe_cell(listing.salary_range),
         )
 

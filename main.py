@@ -201,11 +201,12 @@ def _fetch_all(
 
 
 def _apply_title_based_job_type(listings: list[JobListing]) -> None:
-    """Override job_type in-place when the title makes the type unambiguous."""
     for listing in listings:
         inferred = infer_job_type_from_title(listing.title)
         if inferred:
             listing.job_type = inferred
+        elif not listing.job_type:
+            listing.job_type = "full-time"
 
 
 def _dedupe_by_url(listings: list[JobListing]) -> list[JobListing]:
