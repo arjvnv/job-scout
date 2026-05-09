@@ -1,29 +1,34 @@
 from __future__ import annotations
 
-import concurrent.futures
 import os
+import sys
 import webbrowser
-from typing import Iterable
 
 import click
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.markup import escape
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from config import DEFAULT_LIMIT, SOURCE_REGISTRY
 from models import JobListing
 from output.csv_writer import write_csv
 from output.table import render_table
-from search.query import filter_by_relevance, infer_job_type_from_title, normalize_query
+from search.pipeline import run_pipeline
+from search.query import normalize_query
 from sources.base import JobSource
 
 
 VALID_TYPES = ("full-time", "internship", "research", "contract", "any")
 
+_AI_PROVIDER_CHOICES: list[tuple[str, str, str]] = [
+    ("OpenAI", "OPENAI_API_KEY", "OpenAI API Key"),
+    ("Anthropic", "ANTHROPIC_API_KEY", "Anthropic API Key"),
+    ("Gemini", "GEMINI_API_KEY", "Gemini API Key"),
+]
+
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.argument("query")
+@click.argument("query", required=False)
 @click.option(
     "-t",
     "--type",
@@ -75,8 +80,22 @@ VALID_TYPES = ("full-time", "internship", "research", "contract", "any")
     default=None,
     help="Open result #N directly in your browser.",
 )
+@click.option(
+    "--resume",
+    "resume_path",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Score results against a resume (PDF or text).",
+)
+@click.option(
+    "--chat",
+    "chat_mode",
+    is_flag=True,
+    default=False,
+    help="Launch interactive AI chat REPL.",
+)
 def cli(
-    query: str,
+    query: str | None,
     job_type: str,
     location: str | None,
     limit: int,
@@ -84,9 +103,30 @@ def cli(
     sources_arg: str | None,
     force: bool,
     open_index: int | None,
+    resume_path: str | None,
+    chat_mode: bool,
 ) -> None:
     console = Console()
     _maybe_run_setup(console)
+
+    if chat_mode:
+        _run_chat_mode(
+            console=console,
+            query=query,
+            job_type=job_type,
+            location=location,
+            limit=limit,
+            export=export,
+            sources_arg=sources_arg,
+            force=force,
+            open_index=open_index,
+            resume_path=resume_path,
+        )
+        return
+
+    if not query:
+        raise click.UsageError("Missing argument 'QUERY'.")
+
     normalized = normalize_query(query)
 
     if export:
@@ -106,18 +146,26 @@ def cli(
 
     effective_type = None if job_type == "any" else job_type
 
-    listings = _fetch_all(
+    listings = run_pipeline(
         selected, normalized, effective_type, location, limit, console
     )
 
-    listings = filter_by_relevance(listings, normalized)
-    _apply_title_based_job_type(listings)
-    if effective_type:
-        listings = [l for l in listings if l.job_type == effective_type]
-    listings = _dedupe_by_url(listings)
-    listings.sort(key=_sort_key, reverse=True)
+    scoring_result = None
+    show_match = False
+    if resume_path:
+        scoring_result, show_match = _maybe_score_listings(
+            listings, resume_path, console
+        )
+        if show_match:
+            listings.sort(
+                key=lambda l: (l.match_score if l.match_score is not None else -1),
+                reverse=True,
+            )
 
-    render_table(listings, query)
+    render_table(listings, query, show_match=show_match)
+
+    if scoring_result is not None and show_match:
+        _render_scoring_extras(scoring_result, console)
 
     _render_links(listings, console)
 
@@ -136,6 +184,117 @@ def cli(
         write_csv(listings, export)
 
 
+def _run_chat_mode(
+    console: Console,
+    query: str | None,
+    job_type: str,
+    location: str | None,
+    limit: int,
+    export: str | None,
+    sources_arg: str | None,
+    force: bool,
+    open_index: int | None,
+    resume_path: str | None,
+) -> None:
+    conflicts: list[str] = []
+    if query:
+        conflicts.append("QUERY")
+    if job_type and job_type != "any":
+        conflicts.append("--type")
+    if location:
+        conflicts.append("--location")
+    if limit != DEFAULT_LIMIT:
+        conflicts.append("--limit")
+    if export:
+        conflicts.append("--export")
+    if sources_arg:
+        conflicts.append("--sources")
+    if force:
+        conflicts.append("--force")
+    if open_index is not None:
+        conflicts.append("--open")
+    if conflicts:
+        raise click.UsageError(
+            "--chat is mutually exclusive with: " + ", ".join(conflicts)
+        )
+
+    _require_ai_or_exit(console)
+
+    effective_resume = resume_path or os.getenv("RESUME_PATH")
+    if effective_resume and not os.path.isfile(os.path.expanduser(effective_resume)):
+        console.print(
+            f"[yellow]Warning:[/yellow] resume path '{effective_resume}' not found; "
+            "starting chat without a resume."
+        )
+        effective_resume = None
+
+    from ai.agent import run_chat
+
+    run_chat(effective_resume)
+
+
+def _maybe_score_listings(
+    listings: list[JobListing],
+    resume_path: str,
+    console: Console,
+):
+    from ai.provider import build_llm
+    from ai.resume_parser import load_resume
+    from ai.scorer import score_listings
+
+    llm = build_llm()
+    if llm is None:
+        console.print(
+            "[yellow]Resume scoring requires an AI key (OPENAI_API_KEY, "
+            "ANTHROPIC_API_KEY, or GEMINI_API_KEY). Skipping.[/yellow]"
+        )
+        return None, False
+
+    try:
+        resume_text = load_resume(resume_path)
+    except ValueError as exc:
+        console.print(f"[yellow]Resume could not be loaded: {escape(str(exc))}. Skipping scoring.[/yellow]")
+        return None, False
+
+    if not resume_text.strip():
+        console.print(
+            "[yellow]Resume appears empty (no extractable text); skipping scoring.[/yellow]"
+        )
+        return None, False
+
+    if not listings:
+        return None, False
+
+    console.print(f"[dim]Scoring {len(listings)} listings against resume...[/dim]")
+    try:
+        result = score_listings(listings, resume_text, llm)
+    except Exception as exc:
+        console.print(f"[yellow]Scoring failed: {escape(type(exc).__name__)}. Continuing without scores.[/yellow]")
+        return None, False
+
+    for idx, listing in enumerate(listings):
+        listing.match_score = result.scores.get(idx)
+
+    if result.failed_batches and result.total_batches:
+        scored = sum(1 for l in listings if l.match_score is not None)
+        console.print(
+            f"[yellow]Scoring partially failed — {scored} of {len(listings)} listings scored.[/yellow]"
+        )
+
+    return result, True
+
+
+def _render_scoring_extras(result, console: Console) -> None:
+    if result.skills_gap:
+        console.print("\n[bold]Skills Gap[/bold] (frequent in listings, missing from resume):")
+        for skill, count in result.skills_gap:
+            console.print(f"  • {escape(skill)} (in {count} listing{'s' if count != 1 else ''})")
+    if result.tips:
+        console.print("\n[bold]Resume Tips[/bold]:")
+        for tip in result.tips:
+            console.print(f"  • {escape(tip)}")
+
+
 def _select_sources(
     registry: list[JobSource], sources_arg: str | None, console: Console
 ) -> list[JobSource]:
@@ -152,75 +311,6 @@ def _select_sources(
     return chosen
 
 
-def _fetch_all(
-    sources: Iterable[JobSource],
-    query: str,
-    job_type: str | None,
-    location: str | None,
-    limit: int,
-    console: Console,
-) -> list[JobListing]:
-    results: list[JobListing] = []
-    sources_list = list(sources)
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("{task.description}"),
-        console=console,
-        transient=True,
-    ) as progress:
-        source_tasks = {
-            s.name: progress.add_task(f"[dim]Searching {s.name}...[/dim]", total=None)
-            for s in sources_list
-        }
-
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, len(sources_list))
-        ) as executor:
-            future_to_source = {
-                executor.submit(s.search, query, job_type, location, limit): s
-                for s in sources_list
-            }
-            for future in concurrent.futures.as_completed(future_to_source):
-                source = future_to_source[future]
-                try:
-                    batch = future.result()
-                    results.extend(batch)
-                    progress.update(
-                        source_tasks[source.name],
-                        description=f"[green]✓[/green] {source.name} ({len(batch)} results)",
-                        completed=True,
-                    )
-                except Exception as exc:
-                    progress.update(
-                        source_tasks[source.name],
-                        description=f"[yellow]⚠[/yellow] {source.name} skipped: {type(exc).__name__}",
-                        completed=True,
-                    )
-    return results
-
-
-def _apply_title_based_job_type(listings: list[JobListing]) -> None:
-    for listing in listings:
-        inferred = infer_job_type_from_title(listing.title)
-        if inferred:
-            listing.job_type = inferred
-        elif not listing.job_type:
-            listing.job_type = "full-time"
-
-
-def _dedupe_by_url(listings: list[JobListing]) -> list[JobListing]:
-    seen: set[str] = set()
-    unique: list[JobListing] = []
-    for listing in listings:
-        key = listing.url or f"{listing.source}:{listing.title}:{listing.company}"
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(listing)
-    return unique
-
-
 def _render_links(listings: list[JobListing], console: Console) -> None:
     if not listings:
         return
@@ -228,6 +318,19 @@ def _render_links(listings: list[JobListing], console: Console) -> None:
     for i, listing in enumerate(listings, start=1):
         if listing.url:
             console.print(f"  [dim]{i:>3}[/dim]  {listing.url}")
+
+
+def _require_ai_or_exit(console: Console) -> None:
+    from ai.provider import detect_provider
+
+    if detect_provider() is None:
+        console.print(
+            "Chat mode requires an AI provider key (OpenAI, Anthropic, or Gemini)."
+        )
+        console.print(
+            "Add one of OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY to .env, then re-run."
+        )
+        sys.exit(1)
 
 
 def _maybe_run_setup(console: Console) -> None:
@@ -266,6 +369,8 @@ def _maybe_run_setup(console: Console) -> None:
         if usajobs_key:
             lines.append(f"USAJOBS_AUTH_KEY={usajobs_key}")
 
+    _prompt_ai_setup(console, lines)
+
     with open(".env", "w") as f:
         f.write("\n".join(lines) + "\n" if lines else "")
 
@@ -273,12 +378,40 @@ def _maybe_run_setup(console: Console) -> None:
     console.print("\n[green]Setup complete.[/green] Starting search...\n")
 
 
-def _sort_key(listing: JobListing) -> tuple[int, str]:
-    # Tuple ordering: entries with a posted_date sort ahead of None entries,
-    # and within the dated group the ISO-like strings sort naturally.
-    if listing.posted_date:
-        return (1, listing.posted_date)
-    return (0, "")
+def _prompt_ai_setup(console: Console, lines: list[str]) -> None:
+    console.print(
+        "\n[bold]Optional: enable AI features[/bold] (chat mode and resume matching)."
+    )
+    console.print("  Choose a provider:")
+    console.print("    1) OpenAI       (env: OPENAI_API_KEY)")
+    console.print("    2) Anthropic    (env: ANTHROPIC_API_KEY)")
+    console.print("    3) Gemini       (env: GEMINI_API_KEY)")
+    console.print("    4) Skip")
+    choice = click.prompt(
+        "Choice",
+        type=click.Choice(["1", "2", "3", "4"]),
+        default="4",
+        show_choices=False,
+    )
+    if choice in {"1", "2", "3"}:
+        _, env_var, label = _AI_PROVIDER_CHOICES[int(choice) - 1]
+        key = click.prompt(f"{label} (input hidden)", hide_input=True, default="", show_default=False)
+        if key:
+            lines.append(f"{env_var}={key}")
+
+    resume_path = click.prompt(
+        "Default resume path (optional, press Enter to skip)",
+        default="",
+        show_default=False,
+    )
+    if resume_path:
+        expanded = os.path.expanduser(resume_path)
+        if os.path.isfile(expanded):
+            lines.append(f"RESUME_PATH={expanded}")
+        else:
+            console.print(
+                f"[yellow]Resume path '{escape(resume_path)}' not found; not saved.[/yellow]"
+            )
 
 
 if __name__ == "__main__":

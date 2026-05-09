@@ -57,7 +57,25 @@ def _safe_cell(s: str | None) -> Text:
     return Text("".join(cleaned_chars))
 
 
-def render_table(listings: list[JobListing], query: str) -> None:
+def _match_cell(score: int | None) -> Text:
+    if score is None:
+        return Text("")
+    if score >= 90:
+        color = "green"
+    elif score >= 70:
+        color = "cyan"
+    elif score >= 50:
+        color = "yellow"
+    else:
+        color = "red"
+    return Text(f"{score}%", style=color)
+
+
+def render_table(
+    listings: list[JobListing],
+    query: str,
+    show_match: bool = False,
+) -> None:
     console = Console()
     table = Table(
         title=f'job-scout results for "{query}"',
@@ -72,6 +90,8 @@ def render_table(listings: list[JobListing], query: str) -> None:
     table.add_column("Source")
     table.add_column("Posted")
     table.add_column("Salary")
+    if show_match:
+        table.add_column("Match", justify="right")
 
     for idx, listing in enumerate(listings, start=1):
         type_key = (listing.job_type or "").lower()
@@ -83,7 +103,7 @@ def render_table(listings: list[JobListing], query: str) -> None:
         else:
             type_display = _safe_cell(listing.job_type)
 
-        table.add_row(
+        row = [
             _safe_cell(str(idx)),
             _safe_cell(listing.title),
             _safe_cell(listing.company),
@@ -92,7 +112,10 @@ def render_table(listings: list[JobListing], query: str) -> None:
             _safe_cell(listing.source),
             _safe_cell(_format_date(listing.posted_date)),
             _safe_cell(listing.salary_range),
-        )
+        ]
+        if show_match:
+            row.append(_match_cell(listing.match_score))
+        table.add_row(*row)
 
     console.print(table)
     console.print(f"[bold]Total:[/bold] {len(listings)} listing(s)")
