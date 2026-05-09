@@ -27,7 +27,7 @@ class RemotiveSource(JobSource):
         location: str | None,
         limit: int,
     ) -> list[JobListing]:
-        params: dict[str, str | int] = {"search": query, "limit": limit}
+        params: dict[str, str | int] = {"search": query, "limit": min(limit * 3, 100)}
         response = self.session.get(REMOTIVE_ENDPOINT, params=params, timeout=15)
         response.raise_for_status()
         payload = response.json()

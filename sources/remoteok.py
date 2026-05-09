@@ -37,7 +37,7 @@ class RemoteOKSource(JobSource):
                 continue
 
             tags = [str(t).lower() for t in item.get("tags", [])]
-            inferred_type = _infer_job_type(tags, job_type)
+            inferred_type = _infer_job_type(tags)
 
             listings.append(
                 JobListing(
@@ -58,11 +58,11 @@ class RemoteOKSource(JobSource):
         return listings
 
 
-def _infer_job_type(tags: list[str], requested: str | None) -> str:
+def _infer_job_type(tags: list[str]) -> str:
     for candidate in ("internship", "contract", "part-time", "full-time"):
         if candidate in tags or candidate.replace("-", "_") in tags:
             return candidate
-    return requested or "remote"
+    return "remote"
 
 
 def _format_salary(salary_min: float | None, salary_max: float | None) -> str | None:

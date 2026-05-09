@@ -12,7 +12,7 @@ from config import DEFAULT_LIMIT, SOURCE_REGISTRY
 from models import JobListing
 from output.csv_writer import write_csv
 from output.table import render_table
-from search.query import filter_by_relevance, normalize_query
+from search.query import filter_by_relevance, infer_job_type_from_title, normalize_query
 from sources.base import JobSource
 
 
@@ -99,6 +99,9 @@ def cli(
     )
 
     listings = filter_by_relevance(listings, normalized)
+    _apply_title_based_job_type(listings)
+    if effective_type:
+        listings = [l for l in listings if l.job_type == effective_type]
     listings = _dedupe_by_url(listings)
     listings.sort(key=_sort_key, reverse=True)
 
@@ -154,6 +157,14 @@ def _fetch_all(
                     f"{type(exc).__name__}"
                 )
     return results
+
+
+def _apply_title_based_job_type(listings: list[JobListing]) -> None:
+    """Override job_type in-place when the title makes the type unambiguous."""
+    for listing in listings:
+        inferred = infer_job_type_from_title(listing.title)
+        if inferred:
+            listing.job_type = inferred
 
 
 def _dedupe_by_url(listings: list[JobListing]) -> list[JobListing]:

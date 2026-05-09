@@ -20,3 +20,11 @@ def filter_by_relevance(
         for listing in listings
         if any(word in listing.title.lower() for word in words)
     ]
+
+
+def infer_job_type_from_title(title: str) -> str | None:
+    """Return 'internship' if the title clearly signals an intern role, else None."""
+    lower = title.lower()
+    if "intern" in lower:
+        return "internship"
+    return None
