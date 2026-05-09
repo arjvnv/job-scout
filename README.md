@@ -1,10 +1,12 @@
 # job-scout
 
-A command-line tool that searches job listings across multiple platforms simultaneously. Enter a role name and get back a unified, deduplicated list of open positions — full-time, internship, contract, or research.
+A command-line tool that searches job listings across LinkedIn, Indeed, Glassdoor, and more simultaneously. Enter a role name and get back a unified, deduplicated list of open positions — full-time, internship, contract, or research.
 
 ```
-python main.py "product manager" --type internship --limit 20
+python3 main.py "product manager" --type internship
 ```
+
+No API keys required to get started.
 
 ---
 
@@ -14,22 +16,26 @@ python main.py "product manager" --type internship --limit 20
 - Filter by job type: `full-time`, `internship`, `contract`, `research`, or `any`
 - Filter by location or `remote`
 - Results from multiple sources fetched concurrently and deduplicated
-- Rich color-coded terminal table output
+- Live progress spinner showing each source as it completes
+- Numbered application links printed below every result table
+- Open any result directly in your browser with `--open N`
 - Optional CSV export
+- One-time setup wizard on first run for optional API keys
 
 ---
 
 ## Sources
 
-| Source | API / Scrape | Key Required | Specialty |
+| Source | Method | Key Required | Covers |
 |---|---|---|---|
-| Adzuna | API | Yes (free) | Broad — aggregates Indeed, Glassdoor, and others |
+| JobSpy | Scrape | No | LinkedIn, Indeed, Glassdoor, ZipRecruiter |
 | Remotive | API | No | Remote tech roles |
 | RemoteOK | API | No | Remote roles |
-| USAJobs | API | Yes (free) | Government and research positions |
 | We Work Remotely | Scrape | No | Remote roles |
+| Adzuna | API | Yes (free, optional) | Broad aggregator |
+| USAJobs | API | Yes (free, optional) | Government + research |
 
-Remotive, RemoteOK, and We Work Remotely work out of the box with no configuration. Adzuna and USAJobs require free API keys (see [Setup](#setup)).
+The first four sources work with zero configuration. Adzuna and USAJobs are optional extras — the tool's first-run wizard will ask if you want to set them up.
 
 ---
 
@@ -55,42 +61,20 @@ cd job-scout
 pip install -r requirements.txt
 ```
 
-Or, for a reproducible install using the pinned lockfile:
+### 3. Run it
 
 ```bash
-pip install -r requirements.lock
+python3 main.py "software engineer"
 ```
 
-### 3. Configure API keys
-
-Copy the example env file and fill in your keys:
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` and set the values:
-
-```
-ADZUNA_APP_ID=your_app_id_here
-ADZUNA_APP_KEY=your_app_key_here
-USAJOBS_USER_AGENT=your_email@example.com
-USAJOBS_AUTH_KEY=your_usajobs_api_key_here
-```
-
-**Getting free API keys:**
-
-- **Adzuna** — Register at [developer.adzuna.com](https://developer.adzuna.com). Free tier: 250 requests/day.
-- **USAJobs** — Register at [developer.usajobs.gov](https://developer.usajobs.gov). Free, no rate limit. Use your email as the `User-Agent` value and your assigned key as `USAJOBS_AUTH_KEY`.
-
-If a key is missing, that source is skipped and the others still run.
+On first run, a setup wizard will appear asking if you want to configure optional API keys. You can skip it entirely — LinkedIn, Indeed, and the other sources work immediately without any keys.
 
 ---
 
 ## Usage
 
 ```
-python main.py QUERY [OPTIONS]
+python3 main.py QUERY [OPTIONS]
 ```
 
 ### Options
@@ -99,45 +83,66 @@ python main.py QUERY [OPTIONS]
 |---|---|---|---|
 | `--type` | `-t` | `full-time`, `internship`, `contract`, `research`, `any` | `any` |
 | `--location` | `-l` | City, country, or `remote` | (none) |
-| `--limit` | `-n` | Max results per source | `20` |
+| `--limit` | `-n` | Max results per source | `50` |
+| `--open` | | Open result #N in your browser | (none) |
 | `--export` | `-e` | Save results to a CSV file | (none) |
-| `--force` | `-f` | Overwrite existing export file without prompting | `false` |
+| `--force` | `-f` | Overwrite existing export file | `false` |
 | `--sources` | `-s` | Comma-separated list of sources to query | (all) |
 
 ### Examples
 
 ```bash
-# All open "product manager" roles
-python main.py "product manager"
+# All open product manager roles
+python3 main.py "product manager"
 
-# Internships matching "product" (product manager, product marketing, etc.)
-python main.py "product" --type internship
+# Internships matching "software" (software engineer intern, software dev intern, etc.)
+python3 main.py "software" --type internship
 
-# Remote software engineering roles, limit 10 per source
-python main.py "software engineer" --type full-time --location remote --limit 10
+# Remote full-time roles, 10 results per source
+python3 main.py "data scientist" --type full-time --location remote --limit 10
 
-# Research scientist roles from USAJobs only
-python main.py "research scientist" --type research --sources usajobs
+# Open result #5 directly in your browser
+python3 main.py "product manager" --open 5
 
-# Export results to CSV
-python main.py "data analyst" --export results.csv
+# Research roles (government + academia via USAJobs)
+python3 main.py "research scientist" --type research --sources usajobs
 
-# Query only the keyless sources
-python main.py "designer" --sources remotive,remoteok,weworkremotely
+# Export to CSV for filtering in a spreadsheet
+python3 main.py "data analyst" --export results.csv
 ```
 
 ---
 
 ## Output
 
-Results are displayed as a color-coded table in the terminal:
+After each search, job-scout displays:
 
-- Full-time: green
-- Internship: yellow
-- Research: cyan
-- Contract: magenta
+1. **A color-coded table** — job type is highlighted (internship = yellow, full-time = green, research = cyan, contract = magenta)
+2. **A numbered application link list** — every result's URL printed below the table for easy copying
 
-If `--export` is passed, results are also saved to a CSV with all fields (title, company, location, type, URL, source, posted date, salary).
+To jump straight to an application, pass `--open N` where N is the result number:
+
+```bash
+python3 main.py "product manager" --limit 20 --open 3
+```
+
+---
+
+## Optional API keys
+
+The setup wizard handles this on first run, but you can also configure keys manually. Copy `.env.example` to `.env` and fill in any of:
+
+```
+ADZUNA_APP_ID=your_app_id_here
+ADZUNA_APP_KEY=your_app_key_here
+USAJOBS_USER_AGENT=your_email@example.com
+USAJOBS_AUTH_KEY=your_usajobs_api_key_here
+```
+
+- **Adzuna** — [developer.adzuna.com](https://developer.adzuna.com) — free, 250 req/day
+- **USAJobs** — [developer.usajobs.gov](https://developer.usajobs.gov) — free, no rate limit
+
+Any missing keys are silently skipped — the rest of the sources still run.
 
 ---
 
@@ -150,6 +155,7 @@ job-scout/
 ├── models.py                # JobListing dataclass
 ├── sources/
 │   ├── base.py              # Abstract JobSource interface
+│   ├── jobspy_source.py     # LinkedIn, Indeed, Glassdoor, ZipRecruiter
 │   ├── adzuna.py
 │   ├── remotive.py
 │   ├── remoteok.py
