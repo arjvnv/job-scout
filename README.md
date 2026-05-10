@@ -1,12 +1,12 @@
 # job-scout
 
-A command-line tool that searches job listings across LinkedIn, Indeed, Glassdoor, and more simultaneously. Enter a role name and get back a unified, deduplicated list of open positions — full-time, internship, contract, or research.
+A command-line job search tool that searches LinkedIn, Indeed, Glassdoor, and more simultaneously — and optionally uses AI to score results against your resume, surface skills gaps, and let you search in plain English.
 
-```
+```bash
 python3 main.py "product manager" --type internship
 ```
 
-No API keys required to get started.
+No API keys required to get started. AI features are optional and work with OpenAI, Anthropic, or Gemini.
 
 ---
 
@@ -20,6 +20,8 @@ No API keys required to get started.
 - Numbered application links printed below every result table
 - Open any result directly in your browser with `--open N`
 - Optional CSV export
+- **AI chat mode** — describe what you want in plain English, refine results conversationally
+- **AI resume matching** — score listings against your resume, see a skills gap summary and resume tips
 - One-time setup wizard on first run for optional API keys
 
 ---
@@ -35,7 +37,7 @@ No API keys required to get started.
 | Adzuna | API | Yes (free, optional) | Broad aggregator |
 | USAJobs | API | Yes (free, optional) | Government + research |
 
-The first four sources work with zero configuration. Adzuna and USAJobs are optional extras — the tool's first-run wizard will ask if you want to set them up.
+The first four sources work with zero configuration. Adzuna and USAJobs are optional extras — the first-run wizard will ask if you want to set them up.
 
 ---
 
@@ -67,17 +69,17 @@ pip install -r requirements.txt
 python3 main.py "software engineer"
 ```
 
-On first run, a setup wizard will appear asking if you want to configure optional API keys. You can skip it entirely — LinkedIn, Indeed, and the other sources work immediately without any keys.
+On first run, a setup wizard will appear. You can skip all prompts — the tool works immediately without any keys. If you want AI features (chat mode, resume matching), the wizard will ask for an AI provider key.
 
 ---
 
 ## Usage
 
+### Standard search
+
 ```
 python3 main.py QUERY [OPTIONS]
 ```
-
-### Options
 
 | Flag | Short | Description | Default |
 |---|---|---|---|
@@ -88,7 +90,7 @@ python3 main.py QUERY [OPTIONS]
 | `--export` | `-e` | Save results to a CSV file | (none) |
 | `--force` | `-f` | Overwrite existing export file | `false` |
 | `--sources` | `-s` | Comma-separated list of sources to query | (all) |
-| `--resume` | | Path to a resume (PDF or .txt) to score listings against | (none) |
+| `--resume` | | Path to resume (PDF or .txt) — scores results with AI | (none) |
 | `--chat` | | Launch the interactive AI chat REPL | `false` |
 
 ### Examples
@@ -97,7 +99,7 @@ python3 main.py QUERY [OPTIONS]
 # All open product manager roles
 python3 main.py "product manager"
 
-# Internships matching "software" (software engineer intern, software dev intern, etc.)
+# Internships matching "software"
 python3 main.py "software" --type internship
 
 # Remote full-time roles, 10 results per source
@@ -109,73 +111,138 @@ python3 main.py "product manager" --open 5
 # Research roles (government + academia via USAJobs)
 python3 main.py "research scientist" --type research --sources usajobs
 
-# Export to CSV for filtering in a spreadsheet
+# Export to CSV
 python3 main.py "data analyst" --export results.csv
 
-# Score results against your resume (requires an AI key)
-python3 main.py "ml engineer" --type full-time --resume ~/resume.pdf
+# Score results against your resume
+python3 main.py "ml engineer" --resume ~/resume.pdf
 
-# Launch the interactive AI chat REPL
+# Launch AI chat mode
+python3 main.py --chat
+
+# Chat mode with resume pre-loaded
+python3 main.py --chat --resume ~/resume.pdf
+```
+
+---
+
+## AI chat mode
+
+Chat mode lets you search and explore job listings in plain English — no flags to remember. Just describe what you want, then keep refining.
+
+```bash
 python3 main.py --chat
 ```
 
----
-
-## Chat mode
-
-`python3 main.py --chat` starts an interactive REPL where you can describe what you want in natural language. The agent uses the same search pipeline as the standard CLI and can search, filter, score against your resume, open results in the browser, summarize listings, and export to CSV.
-
 ```
-$ python3 main.py --chat
-
-job-scout chat  ·  provider: openai (gpt-4o-mini)  ·  resume: loaded (~/resume.pdf)
+job-scout chat  ·  provider: openai (gpt-4o-mini)  ·  resume: none
 Type /help for commands, /exit to quit.
 
-you> find ml internships in nyc
-you> filter to companies with under 500 people
+you> find ml engineering internships in new york
+
+[searching…]
+Found 18 internships. Here are the top results:
+
+ #  Title                  Company     Location  Posted      Match
+ 1  ML Research Intern     Hudson AI   NYC       2026-05-06
+ 2  Applied ML Intern      Two Sigma   NYC       2026-05-04
+ 3  ML Platform Intern     Citadel     NYC       2026-05-03
+...
+
+you> filter to only startups, drop the finance companies
+Filtered to 7 listings.
+
 you> open 1
+Opening https://... in browser.
+
+you> what skills does #2 need?
+Two Sigma — Applied ML Intern:
+  • Python, PyTorch, distributed training
+  • Strong stats / probability fundamentals
+  • Experience with large datasets (Spark or equivalent)
+
 you> save these to ~/Desktop/ml-internships.csv
+Exported 7 listing(s) to /Users/.../ml-internships.csv.
+
 you> /exit
+Goodbye.
 ```
 
-Built-in commands:
+### Built-in chat commands
 
 | Command | Description |
 |---|---|
-| `/help` | List commands and agent capabilities. |
-| `/results` | Re-render the current results table. |
-| `/clear` | Clear results and conversation history. |
-| `/resume PATH` | Load or replace the resume in-session. |
-| `/exit`, `/quit` | Exit chat. Ctrl-D also exits. |
+| `/help` | Show available commands and agent capabilities |
+| `/results` | Re-render the current results table |
+| `/clear` | Clear results and conversation history |
+| `/resume PATH` | Load or replace a resume mid-session |
+| `/exit`, `/quit` | Exit. Ctrl-D also exits. |
 
-Chat mode requires an AI provider key — see [AI setup](#ai-setup) below.
+Chat mode requires an AI key — see [AI setup](#ai-setup) below.
 
 ---
 
-## Resume matching
+## AI resume matching
 
-Pass `--resume PATH` to any standard search to score listings against a resume. PDF and plain-text resumes are supported. The results table gets a new colored `Match` column, results are re-sorted by score, and a `Skills Gap` + `Resume Tips` block is printed below the table.
+Pass `--resume` to any standard search to score every listing against your resume. Results are re-sorted by match score and a skills gap summary + resume tips are printed below the table.
 
 ```bash
 python3 main.py "ml engineer" --resume ~/resume.pdf
 ```
 
-Without an AI key, `--resume` prints a yellow warning and falls back to the standard table.
+```
+Searching... (spinner per source)
+Scoring 23 listings against resume...
+
+                    job-scout results for "ml engineer"
+ #  Title                  Company  Location  Type       Posted      Salary  Match
+ 1  Senior ML Engineer     Acme     Remote    full-time  2026-05-08  $180k   92%
+ 2  ML Platform Engineer   Globex   NYC       full-time  2026-05-07          88%
+ 3  Applied ML Engineer    Initech  Austin    full-time  2026-05-06  $150k   74%
+...
+
+Skills Gap (frequent in top listings, not found in your resume):
+  • Kubernetes (in 14 listings)
+  • Ray / distributed training (in 9 listings)
+  • Online feature stores (in 6 listings)
+
+Resume Tips:
+  • Quantify model impact — most listings screen for production metrics (latency, accuracy lift).
+  • Add a one-line MLOps summary; half of these roles require K8s or CI for ML pipelines.
+  • Move your Spark/Ray experience above the fold — it's the most-asked distributed computing skill here.
+```
+
+Match score colors: green (90%+), cyan (70–89%), yellow (50–69%), red (below 50%).
+
+PDF and plain-text resumes are both supported. If no AI key is present, `--resume` prints a warning and falls back to the standard unscored table.
 
 ---
 
 ## AI setup
 
-AI features (chat mode + resume matching) work with any of OpenAI, Anthropic, or Gemini. Add one of the following to your `.env`:
+AI features (chat mode and resume matching) work with any one of these providers:
+
+| Provider | Environment variable | Get a key |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+| Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+| Gemini | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
+
+You only need one. Add it to your `.env` file:
 
 ```
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-GEMINI_API_KEY=...
-RESUME_PATH=/path/to/resume.pdf   # optional default resume for --chat
+OPENAI_API_KEY=sk-...
 ```
 
-The setup wizard (first run) will prompt for an AI provider and an optional default resume path. If multiple keys are set, the first match in the order above wins.
+Or let the first-run setup wizard collect it interactively — it will prompt for a provider and key as part of its setup flow.
+
+You can also set a default resume path so you don't have to pass `--resume` every time:
+
+```
+RESUME_PATH=/Users/you/resume.pdf
+```
+
+Models used (cheapest/fastest in each family): `gpt-4o-mini`, `claude-haiku`, `gemini-1.5-flash`.
 
 ---
 
@@ -183,10 +250,10 @@ The setup wizard (first run) will prompt for an AI provider and an optional defa
 
 After each search, job-scout displays:
 
-1. **A color-coded table** — job type is highlighted (internship = yellow, full-time = green, research = cyan, contract = magenta)
-2. **A numbered application link list** — every result's URL printed below the table for easy copying
+1. **A color-coded table** — job type is highlighted: internship = yellow, full-time = green, research = cyan, contract = magenta
+2. **A numbered application link list** — every result's URL printed below the table
 
-To jump straight to an application, pass `--open N` where N is the result number:
+To jump straight to an application:
 
 ```bash
 python3 main.py "product manager" --limit 20 --open 3
@@ -194,9 +261,9 @@ python3 main.py "product manager" --limit 20 --open 3
 
 ---
 
-## Optional API keys
+## Optional API keys (non-AI)
 
-The setup wizard handles this on first run, but you can also configure keys manually. Copy `.env.example` to `.env` and fill in any of:
+The setup wizard handles these on first run, but you can also configure them manually. Copy `.env.example` to `.env` and fill in any of:
 
 ```
 ADZUNA_APP_ID=your_app_id_here
@@ -212,13 +279,19 @@ Any missing keys are silently skipped — the rest of the sources still run.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 job-scout/
 ├── main.py                  # CLI entry point
 ├── config.py                # Source registry and env config
 ├── models.py                # JobListing dataclass
+├── ai/
+│   ├── provider.py          # AI provider detection (OpenAI / Anthropic / Gemini)
+│   ├── agent.py             # Chat mode REPL and LangChain agent
+│   ├── tools.py             # Agent tools (search, filter, open, score, export)
+│   ├── resume_parser.py     # PDF and text resume loading
+│   └── scorer.py            # Batched resume scoring + skills gap + tips
 ├── sources/
 │   ├── base.py              # Abstract JobSource interface
 │   ├── jobspy_source.py     # LinkedIn, Indeed, Glassdoor, ZipRecruiter
@@ -228,7 +301,8 @@ job-scout/
 │   ├── usajobs.py
 │   └── weworkremotely.py
 ├── search/
-│   └── query.py             # Query normalization and relevance filtering
+│   ├── query.py             # Query normalization and relevance filtering
+│   └── pipeline.py          # Shared fetch + filter + dedupe pipeline
 ├── output/
 │   ├── table.py             # Terminal table renderer
 │   └── csv_writer.py        # CSV export
@@ -239,7 +313,7 @@ job-scout/
 
 ---
 
-## Adding a New Source
+## Adding a new source
 
 1. Create `sources/your_source.py` implementing the `JobSource` base class
 2. Implement `search(self, query, job_type, location, limit) -> list[JobListing]`
