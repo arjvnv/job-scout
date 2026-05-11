@@ -147,6 +147,10 @@ def _locations_match(a: str | None, b: str | None) -> bool:
 
 
 def _is_same_listing(a: JobListing, b: JobListing) -> bool:
+    if len(a.title) > 1024 or len(b.title) > 1024:
+        return False
+    if len(a.company) > 256 or len(b.company) > 256:
+        return False
     title_sim = fuzz.token_set_ratio(a.title.lower(), b.title.lower())
     if title_sim <= 85:
         return False

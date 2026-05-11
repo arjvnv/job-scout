@@ -5,6 +5,7 @@ import sys
 import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import click
 from dotenv import load_dotenv
@@ -50,7 +51,7 @@ _AI_PROVIDER_CHOICES: list[tuple[str, str, str]] = [
 @click.option(
     "-n",
     "--limit",
-    type=int,
+    type=click.IntRange(1, 500),
     default=DEFAULT_LIMIT,
     show_default=True,
     help="Max results per source.",
@@ -225,7 +226,7 @@ def cli(
             url = listings[open_index - 1].url
             if url:
                 console.print(f"\nOpening [cyan]{url}[/cyan] in browser...")
-                webbrowser.open(url)
+                _safe_open_url(url, console)
             else:
                 console.print("[yellow]No URL available for that result.[/yellow]")
         else:
@@ -239,6 +240,23 @@ def cli(
             console.print("[dim]No results to browse.[/dim]")
         else:
             _run_browser(listings, console)
+
+
+def _safe_open_url(url: str | None, console: Console) -> bool:
+    if not url:
+        return False
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https") or not p.netloc:
+        console.print("[yellow]Warning:[/yellow] skipping non-http(s) URL.")
+        return False
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in url):
+        console.print("[yellow]Warning:[/yellow] skipping URL with control characters.")
+        return False
+    webbrowser.open(url, new=2)
+    return True
 
 
 def _parse_posted_date(s: str | None) -> datetime | None:
@@ -294,6 +312,9 @@ def _run_browser(listings: list[JobListing], console: Console) -> None:
         )
         return
 
+    if not listings:
+        return
+
     try:
         from prompt_toolkit.application import Application
         from prompt_toolkit.formatted_text import FormattedText
@@ -316,6 +337,10 @@ def _run_browser(listings: list[JobListing], console: Console) -> None:
 
     def _title_bar():
         return FormattedText([("bold", "job-scout — browse mode")])
+
+    def _strip_bidi(s: str) -> str:
+        from output.table import _BIDI_CODE_POINTS
+        return "".join(c for c in s if c not in _BIDI_CODE_POINTS)
 
     def _truncate(s: str, width: int) -> str:
         if width <= 0:
@@ -351,11 +376,11 @@ def _run_browser(listings: list[JobListing], console: Console) -> None:
                 cursor
                 + _pad(str(i + 1), idx_w)
                 + " "
-                + _pad(listing.title or "", title_w)
+                + _pad(_strip_bidi(listing.title or ""), title_w)
                 + " "
-                + _pad(listing.company or "", company_w)
+                + _pad(_strip_bidi(listing.company or ""), company_w)
                 + " "
-                + _pad(listing.location or "", location_w)
+                + _pad(_strip_bidi(listing.location or ""), location_w)
                 + " "
                 + _pad(listing.source or "", source_w)
             )
@@ -389,7 +414,7 @@ def _run_browser(listings: list[JobListing], console: Console) -> None:
     @kb.add("down")
     @kb.add("j")
     def _(event):
-        state["idx"] = min(len(listings) - 1, state["idx"] + 1)
+        state["idx"] = min(max(0, len(listings) - 1), state["idx"] + 1)
         event.app.invalidate()
 
     @kb.add("g")
@@ -399,7 +424,7 @@ def _run_browser(listings: list[JobListing], console: Console) -> None:
 
     @kb.add("G")
     def _(event):
-        state["idx"] = len(listings) - 1
+        state["idx"] = max(0, len(listings) - 1)
         event.app.invalidate()
 
     @kb.add("pageup")
@@ -409,15 +434,17 @@ def _run_browser(listings: list[JobListing], console: Console) -> None:
 
     @kb.add("pagedown")
     def _(event):
-        state["idx"] = min(len(listings) - 1, state["idx"] + 10)
+        state["idx"] = min(max(0, len(listings) - 1), state["idx"] + 10)
         event.app.invalidate()
 
     @kb.add("enter")
     def _(event):
         url = listings[state["idx"]].url
         if url:
-            webbrowser.open(url)
-            state["opened"] += 1
+            if _safe_open_url(url, console):
+                state["opened"] += 1
+            else:
+                _set_status("[URL rejected]")
         else:
             _set_status("[no URL for this result]")
         event.app.invalidate()
