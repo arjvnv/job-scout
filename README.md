@@ -13,12 +13,16 @@ No API keys required to get started. AI features are optional and work with Open
 ## Features
 
 - Search by partial or full role name (`"product"` matches product manager, product marketing, etc.)
+- **Query expansion** — type abbreviations like `SWE`, `PM`, `DS`, `MLE` and the tool expands them automatically
 - Filter by job type: `full-time`, `internship`, `contract`, `research`, or `any`
+- **Filter by seniority** with `--level`: `junior`, `mid`, `senior`, `lead`, or `intern`
+- **Filter by recency** with `--posted-within N`: only show jobs posted in the last N days
 - Filter by location or `remote`
-- Results from multiple sources fetched concurrently and deduplicated
+- Results from multiple sources fetched concurrently and deduplicated — including cross-source fuzzy deduplication so the same job on LinkedIn and Indeed only appears once
 - Live progress spinner showing each source as it completes
 - Numbered application links printed below every result table
 - Open any result directly in your browser with `--open N`
+- **Interactive result browser** with `--browse` — navigate with arrow keys, press Enter to open
 - Optional CSV export
 - **AI chat mode** — describe what you want in plain English, refine results conversationally
 - **AI resume matching** — score listings against your resume, see a skills gap summary and resume tips
@@ -84,9 +88,12 @@ python3 main.py QUERY [OPTIONS]
 | Flag | Short | Description | Default |
 |---|---|---|---|
 | `--type` | `-t` | `full-time`, `internship`, `contract`, `research`, `any` | `any` |
+| `--level` | | `junior`, `mid`, `senior`, `lead`, `intern`, `any` | `any` |
 | `--location` | `-l` | City, country, or `remote` | (none) |
-| `--limit` | `-n` | Max results per source | `50` |
+| `--posted-within` | `-w` | Only show jobs posted within the last N days | (none) |
+| `--limit` | `-n` | Max results per source (1–500) | `50` |
 | `--open` | | Open result #N in your browser | (none) |
+| `--browse` | | Launch interactive result browser after search | `false` |
 | `--export` | `-e` | Save results to a CSV file | (none) |
 | `--force` | `-f` | Overwrite existing export file | `false` |
 | `--sources` | `-s` | Comma-separated list of sources to query | (all) |
@@ -99,14 +106,20 @@ python3 main.py QUERY [OPTIONS]
 # All open product manager roles
 python3 main.py "product manager"
 
-# Internships matching "software"
-python3 main.py "software" --type internship
+# Abbreviations expand automatically — "SWE" becomes "software engineer"
+python3 main.py "SWE" --type internship
+
+# Senior roles only, posted in the last 7 days
+python3 main.py "data scientist" --level senior --posted-within 7
 
 # Remote full-time roles, 10 results per source
 python3 main.py "data scientist" --type full-time --location remote --limit 10
 
 # Open result #5 directly in your browser
 python3 main.py "product manager" --open 5
+
+# Browse results interactively with arrow keys
+python3 main.py "PM" --browse
 
 # Research roles (government + academia via USAJobs)
 python3 main.py "research scientist" --type research --sources usajobs
@@ -115,7 +128,7 @@ python3 main.py "research scientist" --type research --sources usajobs
 python3 main.py "data analyst" --export results.csv
 
 # Score results against your resume
-python3 main.py "ml engineer" --resume ~/resume.pdf
+python3 main.py "MLE" --resume ~/resume.pdf
 
 # Launch AI chat mode
 python3 main.py --chat
@@ -123,6 +136,57 @@ python3 main.py --chat
 # Chat mode with resume pre-loaded
 python3 main.py --chat --resume ~/resume.pdf
 ```
+
+---
+
+## Query expansion
+
+You don't need to know the exact job title to search. Common abbreviations are expanded automatically:
+
+| You type | Searches for |
+|---|---|
+| `SWE` | software engineer |
+| `PM` | product manager |
+| `DS` | data scientist |
+| `MLE` | machine learning engineer |
+| `ML` | machine learning |
+| `SRE` | site reliability engineer |
+| `DevOps` | devops engineer |
+| `UX` | UX designer |
+| `QA` | QA engineer |
+| `BA` | business analyst |
+
+When a query is expanded, the tool tells you: `Searching for "software engineer" (expanded from "SWE")`.
+
+---
+
+## Seniority filter
+
+`--level` infers experience level from each listing's title and filters accordingly:
+
+```bash
+python3 main.py "engineer" --level senior
+python3 main.py "SWE" --type internship --level intern
+```
+
+Levels: `intern`, `junior`, `mid`, `senior`, `lead`. Listings that can't be inferred are shown under `any`.
+
+---
+
+## Interactive browser
+
+`--browse` launches a keyboard-driven result browser after the table renders:
+
+```bash
+python3 main.py "product manager" --browse
+```
+
+| Key | Action |
+|---|---|
+| `↑` / `k` | Move up |
+| `↓` / `j` | Move down |
+| `Enter` | Open highlighted result in browser |
+| `q` | Quit browser |
 
 ---
 
