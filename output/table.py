@@ -87,6 +87,7 @@ def render_table(
     table.add_column("Company")
     table.add_column("Location")
     table.add_column("Type")
+    table.add_column("Level")
     table.add_column("Source")
     table.add_column("Posted")
     table.add_column("Salary")
@@ -109,6 +110,7 @@ def render_table(
             _safe_cell(listing.company),
             _safe_cell(listing.location),
             type_display,
+            _safe_cell(listing.level),
             _safe_cell(listing.source),
             _safe_cell(_format_date(listing.posted_date)),
             _safe_cell(listing.salary_range),
