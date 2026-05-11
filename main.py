@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import webbrowser
+from datetime import datetime, timedelta, timezone
 
 import click
 from dotenv import load_dotenv
@@ -14,11 +16,12 @@ from models import JobListing
 from output.csv_writer import write_csv
 from output.table import render_table
 from search.pipeline import run_pipeline
-from search.query import normalize_query
+from search.query import expand_query
 from sources.base import JobSource
 
 
 VALID_TYPES = ("full-time", "internship", "research", "contract", "any")
+VALID_LEVELS = ("any", "intern", "junior", "mid", "senior", "lead")
 
 _AI_PROVIDER_CHOICES: list[tuple[str, str, str]] = [
     ("OpenAI", "OPENAI_API_KEY", "OpenAI API Key"),
@@ -94,6 +97,27 @@ _AI_PROVIDER_CHOICES: list[tuple[str, str, str]] = [
     default=False,
     help="Launch interactive AI chat REPL.",
 )
+@click.option(
+    "-w",
+    "--posted-within",
+    "posted_within",
+    type=int,
+    default=None,
+    help="Only show listings posted within the last N days.",
+)
+@click.option(
+    "--level",
+    type=click.Choice(VALID_LEVELS, case_sensitive=False),
+    default="any",
+    show_default=True,
+    help="Seniority filter.",
+)
+@click.option(
+    "--browse",
+    is_flag=True,
+    default=False,
+    help="Browse results interactively (arrow keys, Enter to open).",
+)
 def cli(
     query: str | None,
     job_type: str,
@@ -105,6 +129,9 @@ def cli(
     open_index: int | None,
     resume_path: str | None,
     chat_mode: bool,
+    posted_within: int | None,
+    level: str,
+    browse: bool,
 ) -> None:
     console = Console()
     _maybe_run_setup(console)
@@ -121,13 +148,25 @@ def cli(
             force=force,
             open_index=open_index,
             resume_path=resume_path,
+            posted_within=posted_within,
+            level=level,
+            browse=browse,
         )
         return
 
     if not query:
         raise click.UsageError("Missing argument 'QUERY'.")
 
-    normalized = normalize_query(query)
+    if posted_within is not None and posted_within < 1:
+        raise click.UsageError("--posted-within must be >= 1")
+
+    expanded, was_expanded = expand_query(query)
+    normalized = expanded
+    if was_expanded:
+        console.print(
+            f'[dim]Searching for "{escape(expanded)}" '
+            f'(expanded from "{escape(query.strip())}")[/dim]'
+        )
 
     if export:
         if os.path.exists(export) and not force:
@@ -149,6 +188,18 @@ def cli(
     listings = run_pipeline(
         selected, normalized, effective_type, location, limit, console
     )
+
+    if posted_within is not None:
+        listings = _apply_posted_within_filter(listings, posted_within, console)
+
+    if level != "any":
+        before = len(listings)
+        listings = [l for l in listings if l.level == level]
+        dropped = before - len(listings)
+        if dropped:
+            console.print(
+                f"[dim]Level filter '{level}': dropped {dropped} non-matching listing(s).[/dim]"
+            )
 
     scoring_result = None
     show_match = False
@@ -183,6 +234,230 @@ def cli(
     if export:
         write_csv(listings, export)
 
+    if browse:
+        if not listings:
+            console.print("[dim]No results to browse.[/dim]")
+        else:
+            _run_browser(listings, console)
+
+
+def _parse_posted_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    raw = s.strip()
+    if not raw:
+        return None
+    candidates = [raw]
+    if raw.endswith("Z"):
+        candidates.append(raw[:-1] + "+00:00")
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        candidates.append(raw[:10])
+    for cand in candidates:
+        try:
+            dt = datetime.fromisoformat(cand)
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    return None
+
+
+def _apply_posted_within_filter(
+    listings: list[JobListing], days: int, console: Console
+) -> list[JobListing]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    kept: list[JobListing] = []
+    dropped = 0
+    unknown_kept = 0
+    for listing in listings:
+        parsed = _parse_posted_date(listing.posted_date)
+        if parsed is None:
+            kept.append(listing)
+            unknown_kept += 1
+            continue
+        if parsed >= cutoff:
+            kept.append(listing)
+        else:
+            dropped += 1
+    console.print(
+        f"[dim]Filtered to listings posted within last {days} days "
+        f"(dropped {dropped}, kept {unknown_kept} with unknown dates).[/dim]"
+    )
+    return kept
+
+
+def _run_browser(listings: list[JobListing], console: Console) -> None:
+    if not sys.stdout.isatty():
+        console.print(
+            "[yellow]Interactive browser requires a TTY; skipping --browse.[/yellow]"
+        )
+        return
+
+    try:
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.formatted_text import FormattedText
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import HSplit, Layout, Window
+        from prompt_toolkit.layout.controls import FormattedTextControl
+        from prompt_toolkit.layout.dimension import Dimension
+    except ImportError:
+        console.print(
+            "[yellow]prompt_toolkit not available; skipping --browse.[/yellow]"
+        )
+        return
+
+    state = {
+        "idx": 0,
+        "status": None,
+        "status_until": 0.0,
+        "opened": 0,
+    }
+
+    def _title_bar():
+        return FormattedText([("bold", "job-scout — browse mode")])
+
+    def _truncate(s: str, width: int) -> str:
+        if width <= 0:
+            return ""
+        if len(s) <= width:
+            return s
+        if width == 1:
+            return "…"
+        return s[: width - 1] + "…"
+
+    def _pad(s: str, width: int) -> str:
+        s = _truncate(s, width)
+        return s + " " * (width - len(s))
+
+    def _render_rows():
+        try:
+            term_width = os.get_terminal_size().columns
+        except OSError:
+            term_width = 100
+        idx_w = 4
+        company_w = 24
+        location_w = 18
+        source_w = 12
+        cursor_w = 2
+        gap = 4
+        used = cursor_w + idx_w + company_w + location_w + source_w + gap
+        title_w = max(12, term_width - used)
+
+        rows: list[tuple[str, str]] = []
+        for i, listing in enumerate(listings):
+            cursor = "> " if i == state["idx"] else "  "
+            line = (
+                cursor
+                + _pad(str(i + 1), idx_w)
+                + " "
+                + _pad(listing.title or "", title_w)
+                + " "
+                + _pad(listing.company or "", company_w)
+                + " "
+                + _pad(listing.location or "", location_w)
+                + " "
+                + _pad(listing.source or "", source_w)
+            )
+            style = "bold cyan" if i == state["idx"] else ""
+            rows.append((style, line + "\n"))
+        return FormattedText(rows)
+
+    def _render_status():
+        now = time.monotonic()
+        if state["status"] and now < state["status_until"]:
+            return FormattedText([("reverse", state["status"])])
+        state["status"] = None
+        text = (
+            f"↑↓/jk navigate   Enter open   q quit   "
+            f"({state['idx'] + 1} of {len(listings)})"
+        )
+        return FormattedText([("reverse", text)])
+
+    def _set_status(msg: str, seconds: float = 1.5) -> None:
+        state["status"] = msg
+        state["status_until"] = time.monotonic() + seconds
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    @kb.add("k")
+    def _(event):
+        state["idx"] = max(0, state["idx"] - 1)
+        event.app.invalidate()
+
+    @kb.add("down")
+    @kb.add("j")
+    def _(event):
+        state["idx"] = min(len(listings) - 1, state["idx"] + 1)
+        event.app.invalidate()
+
+    @kb.add("g")
+    def _(event):
+        state["idx"] = 0
+        event.app.invalidate()
+
+    @kb.add("G")
+    def _(event):
+        state["idx"] = len(listings) - 1
+        event.app.invalidate()
+
+    @kb.add("pageup")
+    def _(event):
+        state["idx"] = max(0, state["idx"] - 10)
+        event.app.invalidate()
+
+    @kb.add("pagedown")
+    def _(event):
+        state["idx"] = min(len(listings) - 1, state["idx"] + 10)
+        event.app.invalidate()
+
+    @kb.add("enter")
+    def _(event):
+        url = listings[state["idx"]].url
+        if url:
+            webbrowser.open(url)
+            state["opened"] += 1
+        else:
+            _set_status("[no URL for this result]")
+        event.app.invalidate()
+
+    @kb.add("q")
+    @kb.add("c-c")
+    def _(event):
+        event.app.exit()
+
+    app = Application(
+        layout=Layout(
+            HSplit(
+                [
+                    Window(FormattedTextControl(_title_bar), height=1),
+                    Window(
+                        FormattedTextControl(_render_rows, focusable=True),
+                        height=Dimension(min=1),
+                        wrap_lines=False,
+                    ),
+                    Window(FormattedTextControl(_render_status), height=1),
+                ]
+            )
+        ),
+        key_bindings=kb,
+        full_screen=True,
+    )
+
+    try:
+        app.run()
+    except Exception as exc:
+        console.print(
+            f"[yellow]Browser exited unexpectedly ({type(exc).__name__}); continuing.[/yellow]"
+        )
+        return
+
+    if state["opened"]:
+        console.print(
+            f"Closed browser. {state['opened']} result(s) opened."
+        )
+
 
 def _run_chat_mode(
     console: Console,
@@ -195,6 +470,9 @@ def _run_chat_mode(
     force: bool,
     open_index: int | None,
     resume_path: str | None,
+    posted_within: int | None,
+    level: str,
+    browse: bool,
 ) -> None:
     conflicts: list[str] = []
     if query:
@@ -213,6 +491,12 @@ def _run_chat_mode(
         conflicts.append("--force")
     if open_index is not None:
         conflicts.append("--open")
+    if posted_within is not None:
+        conflicts.append("--posted-within")
+    if level and level != "any":
+        conflicts.append("--level")
+    if browse:
+        conflicts.append("--browse")
     if conflicts:
         raise click.UsageError(
             "--chat is mutually exclusive with: " + ", ".join(conflicts)

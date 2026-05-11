@@ -14,3 +14,4 @@ class JobListing:
     posted_date: str | None = None
     salary_range: str | None = None
     match_score: int | None = None
+    level: str | None = None
