@@ -71,10 +71,25 @@ def _match_cell(score: int | None) -> Text:
     return Text(f"{score}%", style=color)
 
 
+def _title_cell(title: str | None, status: str | None) -> Text:
+    """Title cell with an optional dim '[status]' tag appended."""
+    cell = _safe_cell(title)
+    if status:
+        cell.append(" ")
+        # Run the status through the same BiDi/control-char stripper before
+        # rendering. Even though callers filter to a whitelist today, a
+        # tampered pipeline.json could carry a string with embedded BiDi
+        # overrides that would otherwise render in this dim tag.
+        safe_status = _safe_cell(status).plain
+        cell.append(f"[{safe_status}]", style="dim")
+    return cell
+
+
 def render_table(
     listings: list[JobListing],
     query: str,
     show_match: bool = False,
+    pipeline_status: dict[str, str] | None = None,
 ) -> None:
     console = Console()
     table = Table(
@@ -104,9 +119,13 @@ def render_table(
         else:
             type_display = _safe_cell(listing.job_type)
 
+        status_tag: str | None = None
+        if pipeline_status and listing.url:
+            status_tag = pipeline_status.get(listing.url)
+
         row = [
             _safe_cell(str(idx)),
-            _safe_cell(listing.title),
+            _title_cell(listing.title, status_tag),
             _safe_cell(listing.company),
             _safe_cell(listing.location),
             type_display,

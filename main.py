@@ -119,6 +119,13 @@ _AI_PROVIDER_CHOICES: list[tuple[str, str, str]] = [
     default=False,
     help="Browse results interactively (arrow keys, Enter to open).",
 )
+@click.option(
+    "--alerts",
+    "run_alerts_flag",
+    is_flag=True,
+    default=False,
+    help="Run all saved alerts and exit (no AI key required).",
+)
 def cli(
     query: str | None,
     job_type: str,
@@ -133,8 +140,47 @@ def cli(
     posted_within: int | None,
     level: str,
     browse: bool,
+    run_alerts_flag: bool,
 ) -> None:
     console = Console()
+
+    if run_alerts_flag:
+        conflicts: list[str] = []
+        if query:
+            conflicts.append("QUERY")
+        if chat_mode:
+            conflicts.append("--chat")
+        if job_type and job_type != "any":
+            conflicts.append("--type")
+        if location:
+            conflicts.append("--location")
+        if limit != DEFAULT_LIMIT:
+            conflicts.append("--limit")
+        if export:
+            conflicts.append("--export")
+        if sources_arg:
+            conflicts.append("--sources")
+        if force:
+            conflicts.append("--force")
+        if open_index is not None:
+            conflicts.append("--open")
+        if resume_path:
+            conflicts.append("--resume")
+        if posted_within is not None:
+            conflicts.append("--posted-within")
+        if level and level != "any":
+            conflicts.append("--level")
+        if browse:
+            conflicts.append("--browse")
+        if conflicts:
+            raise click.UsageError(
+                "--alerts is mutually exclusive with: " + ", ".join(conflicts)
+            )
+        from tracker.alerts import run_all_alerts
+
+        run_all_alerts(console)
+        return
+
     _maybe_run_setup(console)
 
     if chat_mode:
