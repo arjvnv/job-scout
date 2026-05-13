@@ -37,7 +37,12 @@ _HELP_TEXT = (
     "  • Score current results against the loaded resume.\n"
     "  • Open a result in your browser by number.\n"
     "  • Summarize likely requirements for a specific result.\n"
-    "  • Export current results to CSV."
+    "  • Export current results to CSV.\n"
+    "  • Track jobs in a pipeline (e.g. 'track job 2 as applied', 'show my pipeline',\n"
+    "    'update Stripe to interviewing', 'drop job 3').\n"
+    "  • Save and run named alerts (e.g. 'save this as my ml-remote alert',\n"
+    "    'list alerts', 'run my alerts', 'delete ml-remote').\n"
+    "  • Prep for interviews (e.g. 'prep me for job 3')."
 )
 
 

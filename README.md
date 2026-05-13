@@ -26,6 +26,9 @@ No API keys required to get started. AI features are optional and work with Open
 - Optional CSV export
 - **AI chat mode** — describe what you want in plain English, refine results conversationally
 - **AI resume matching** — score listings against your resume, see a skills gap summary and resume tips
+- **Application pipeline** — track every job through your process: interested, applied, interviewing, offer, rejected
+- **Job alerts** — save searches and re-run them to see only new listings since last time
+- **Interview prep** — AI generates tailored practice questions for any listing
 - One-time setup wizard on first run for optional API keys
 
 ---
@@ -279,6 +282,64 @@ Resume Tips:
 Match score colors: green (90%+), cyan (70–89%), yellow (50–69%), red (below 50%).
 
 PDF and plain-text resumes are both supported. If no AI key is present, `--resume` prints a warning and falls back to the standard unscored table.
+
+---
+
+## Application pipeline
+
+Track every job you're interested in through your entire process. All data is stored locally at `~/.job-scout/pipeline.json` — no accounts, no cloud.
+
+Just talk to the agent in chat mode:
+
+```
+you> mark job #2 as applied
+you> update the Stripe job to interviewing
+you> show my pipeline
+you> remove the Notion job from my pipeline
+```
+
+Statuses: `interested`, `applied`, `phone_screen`, `interviewing`, `offer`, `rejected`
+
+When you run a search, jobs already in your pipeline show a status tag next to their title so you never accidentally apply twice. Rejected jobs are hidden from future searches by default.
+
+---
+
+## Job alerts
+
+Save a search and only ever see new listings since the last time you ran it. Stored at `~/.job-scout/alerts.json`.
+
+```
+you> save this search as my daily ML alert
+you> list my alerts
+you> run my alerts
+you> delete the old alert
+```
+
+Or run all alerts directly from the terminal without entering chat mode:
+
+```bash
+python3 main.py --alerts
+```
+
+Each time alerts run, only listings with URLs not seen in previous runs are shown. The tool remembers everything it has already surfaced.
+
+---
+
+## Interview prep
+
+Pick any result and get AI-generated practice questions specific to that role and company.
+
+```
+you> prep me for the interview at job #3
+```
+
+The agent returns:
+- 3 behavioral questions tailored to the role
+- 3–5 technical questions based on the title and job type
+- 2 questions to ask the interviewer
+- A short note on what to emphasize given the listing
+
+Requires an AI key — see [AI setup](#ai-setup) below.
 
 ---
 
